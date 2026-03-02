@@ -1,0 +1,72 @@
+name: MindIE-SD-TTFHW-auto-build
+
+on:
+  push:
+    branches: [ "**" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Record start time
+        id: start_time
+        run: echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Pull Docker image and record time
+        id: pull_image
+        run: |
+          PULL_START=$(date +%s)
+          docker pull swr.cn-north-4.myhuaweicloud.com/inference/ascend_mindie_ubuntu_x86:20260119_ubuntu24_3.0.0_cann8.5.0_torch2.6.0_py311
+          PULL_END=$(date +%s)
+          PULL_DURATION=$((PULL_END - PULL_START))
+          echo "duration=${PULL_DURATION}s" >> $GITHUB_OUTPUT
+          echo "Image pull time: ${PULL_DURATION}s"
+
+      - name: Build MindIE-SD wheel package and record time
+        id: build_package
+        run: |
+          BUILD_START=$(date +%s)
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace/MindIE-SD \
+            -w /workspace/MindIE-SD \
+            swr.cn-north-4.myhuaweicloud.com/inference/ascend_mindie_ubuntu_x86:20260119_ubuntu24_3.0.0_cann8.5.0_torch2.6.0_py311 \
+            bash -c "source /usr/local/Ascend/ascend-toolkit/set_env.sh && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 && export USER_ABI_VERSION=1 && bash build.sh"
+          BUILD_END=$(date +%s)
+          BUILD_DURATION=$((BUILD_END - BUILD_START))
+          echo "duration=${BUILD_DURATION}s" >> $GITHUB_OUTPUT
+          echo "Build time: ${BUILD_DURATION}s"
+
+      - name: Archive artifacts and record time
+        id: archive
+        run: |
+          ARCHIVE_START=$(date +%s)
+          mkdir -p artifacts
+          find ${{ github.workspace }} -name "*.whl" -type f -exec cp {} artifacts/ \; || echo "No wheel files found"
+          ARCHIVE_END=$(date +%s)
+          ARCHIVE_DURATION=$((ARCHIVE_END - ARCHIVE_START))
+          echo "duration=${ARCHIVE_DURATION}s" >> $GITHUB_OUTPUT
+          echo "Archive time: ${ARCHIVE_DURATION}s"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindie-sd-wheel-packages
+          path: artifacts/*.whl
+          retention-days: 30
+
+      - name: Display build summary
+        run: |
+          echo "=========================================="
+          echo "MindIE-SD Build Summary"
+          echo "=========================================="
+          echo "Image pull time: ${{ steps.pull_image.outputs.duration }}"
+          echo "Build time: ${{ steps.build_package.outputs.duration }}"
+          echo "Archive time: ${{ steps.archive.outputs.duration }}"
+          echo "=========================================="
