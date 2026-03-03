@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+jobs:
+  validate-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required files exist
+        run: |
+          test -f README.md
+          test -f LICENSE
+
+      - name: Basic README sanity check
+        run: |
+          grep -q '^# ' README.md
+
+  wheel-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Normalize workspace ownership and clean stale build artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # Best-effort ownership normalization for self-hosted / containerized runners.
+          if command -v sudo >/dev/null 2>&1; then
+            sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          fi
+
+          # Remove stale files that may be left by previous privileged build steps.
+          rm -rf build dist ./*.egg-info
+          find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -name 'ir_demo.json' -delete
+
+      - name: Build wheel (when setup.py exists)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ -f setup.py ]]; then
+            python -m pip install --upgrade pip setuptools wheel
+            python setup.py bdist_wheel
+          else
+            echo "setup.py not found in this checkout; skip wheel build."
+          fi
